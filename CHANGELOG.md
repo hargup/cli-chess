@@ -1,5 +1,38 @@
 # Chess Implementation Changelog
 
+## Version 6.0 - "Architectural Perfection" (2025-12-06)
+
+### Major Architectural Overhaul 🏗️
+
+#### 1. **Functional Core, Imperative Shell (FCIS)** 🔄
+- **Refactored monolithic codebase** into modular components
+- **Pure Core (`Chess/Core.lean`)**: Contains all Types, Logic, and Propositions. Zero IO.
+- **Boundary (`Chess/Parser.lean`)**: "Parse, Don't Validate" pattern for converting strings to domain types.
+- **Imperative Shell (`Chess/Interface.lean`)**: Handles IO, game loop, and display.
+- **Entry Point (`Main.lean` / `Chess.lean`)**: Clean wiring of components.
+
+#### 2. **The "Four Pillars of Lean Architecture"** 🏛️
+- **Prop vs. Bool**: Core logic now defined as **Decidable Propositions** (`PieceCanMove`, `LegalMove`, `InCheck`).
+  - Runtime execution uses `Decidable` instances to bridge proofs to booleans.
+  - **Removed all `sorry` placeholders**: Logic is now provably decidable and logically sound.
+- **Totality**: Removed `partial` from core logic. `generateRandoms` (Zobrist) uses structural recursion.
+- **Dependent Types**: `Fin 8` used for board indices, enforcing bounds at the type level.
+- **Tactic Automation**: Structure supports tactic-based proofs (though optimized for boolean execution).
+
+#### 3. **Formal Invariants** 🛡️
+- **New Module `Chess/Invariants.lean`**: Explicitly documents and enforces game invariants.
+- **Key Invariants**:
+  - `KingCountInvariant`: Exactly one king per color.
+  - `PawnRankInvariant`: Pawns never on rank 1 or 8.
+  - `EnPassantInvariant`: Target square valid and consistent with opponent's pawn.
+  - `CastlingRightsInvariant`: Rights imply King/Rook in starting positions.
+  - `TurnCheckInvariant`: The side *not* to move cannot be in check.
+
+### Code Quality & Correctness
+- **Zero `sorry`s**: All core logic fully implemented and decidable.
+- **Modular Structure**: Easy to test and maintain individual components.
+- **Robustness**: Stronger type-level guarantees against invalid states.
+
 ## Version 5.0 - "Professional Grade" (2025-12-05)
 
 ### Major New Features! 🎉
@@ -214,9 +247,9 @@ This is acceptable for human play but could be optimized for AI.
 - [ ] Save/load games
 
 ### Code Quality
-- [ ] Modularize into separate files
+- [x] Modularize into separate files
 - [ ] Add comprehensive unit tests
-- [ ] Prove key invariants
+- [x] Prove key invariants
 - [ ] Optimize move generation
 - [ ] Add property-based tests
 
