@@ -1,12 +1,4 @@
 import Chess.Core
+import Chess.Parser
 import Chess.Interface
-
-open Chess.Core
-open Chess.Interface
-
-def main : IO Unit := do
-  IO.println "=== Chess Game ==="
-  IO.println "Move format: e2e4 or e2-e4"
-  IO.println "Type 'resign' to resign"
-  IO.println ""
-  gameLoop initialState
+import Chess.Invariants
