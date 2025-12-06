@@ -1,0 +1,7 @@
+name = "lean-chess"
+version = "1.0.0"
+defaultTargets = ["chess"]
+
+[[lean_exe]]
+name = "chess"
+root = "Chess"
