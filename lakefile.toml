@@ -2,6 +2,9 @@ name = "lean-chess"
 version = "1.0.0"
 defaultTargets = ["chess"]
 
+[[lean_lib]]
+name = "Chess"
+
 [[lean_exe]]
 name = "chess"
-root = "Chess"
+root = "Main"
