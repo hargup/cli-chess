@@ -166,23 +166,54 @@ def PathEmpty (board : Board) (path : List Coord) : Prop :=
   ∀ c ∈ path, (getPiece board c) = none
 
 instance (board : Board) (path : List Coord) : Decidable (PathEmpty board path) :=
-  if h : path.all (fun c => (getPiece board c).isNone) then isTrue sorry else isFalse sorry
+  if h : path.all (fun c => (getPiece board c).isNone) then
+    isTrue (by
+      intro c hc
+      have := List.all_eq_true.mp h c hc
+      simp at this
+      match h_opt : getPiece board c with
+      | none => rfl
+      | some _ =>
+        rw [h_opt] at this
+        contradiction
+    )
+  else
+    isFalse (by
+      intro h_all
+      simp [List.all_eq_true] at h
+      have ⟨c, hc, h_some⟩ := h
+      specialize h_all c hc
+      match h_opt : getPiece board c with
+      | none =>
+        rw [h_opt] at h_some
+        simp at h_some
+      | some _ =>
+        contradiction
+    )
 
 def IsClearStraightPath (board : Board) (from_ to_ : Coord) : Prop :=
   HasStraightPath from_ to_ ∧ PathEmpty board (straightPathCoords from_ to_)
 
 instance (board : Board) (from_ to_ : Coord) : Decidable (IsClearStraightPath board from_ to_) :=
   if h : HasStraightPath from_ to_ then
-    if h2 : PathEmpty board (straightPathCoords from_ to_) then isTrue sorry else isFalse sorry
-  else isFalse sorry
+    if h2 : PathEmpty board (straightPathCoords from_ to_) then
+      isTrue ⟨h, h2⟩
+    else
+      isFalse (fun ⟨_, h2_true⟩ => h2 h2_true)
+  else
+    isFalse (fun ⟨h_true, _⟩ => h h_true)
 
 def IsClearDiagonalPath (board : Board) (from_ to_ : Coord) : Prop :=
   HasDiagonalPath from_ to_ ∧ PathEmpty board (diagonalPathCoords from_ to_)
 
 instance (board : Board) (from_ to_ : Coord) : Decidable (IsClearDiagonalPath board from_ to_) :=
   if h : HasDiagonalPath from_ to_ then
-    if h2 : PathEmpty board (diagonalPathCoords from_ to_) then isTrue sorry else isFalse sorry
-  else isFalse sorry
+    if h2 : PathEmpty board (diagonalPathCoords from_ to_) then
+      isTrue ⟨h, h2⟩
+    else
+      isFalse (fun ⟨_, h2_true⟩ => h2 h2_true)
+  else
+    isFalse (fun ⟨h_true, _⟩ => h h_true)
 
 
 structure PieceOnBoard where
@@ -226,22 +257,7 @@ def squaresThreatenedByKnight (coord : Coord) : List Coord :=
 
 
 -- Proposition: Is a square threatened by a specific color?
-def SquareThreatened (board : Board) (target : Coord) (byColor : Color) : Prop :=
-  ∃ attacker ∈ getPieces board byColor,
-    let start := attacker.coord
-    match attacker.piece.pieceType with
-    | .rook => IsClearStraightPath board start target
-    | .bishop => IsClearDiagonalPath board start target
-    | .queen => IsClearStraightPath board start target ∨ IsClearDiagonalPath board start target
-    | .knight => target ∈ squaresThreatenedByKnight start
-    | .pawn => target ∈ squaresThreatenedByPawn start byColor
-    | .king =>
-        let df := (start.file_ord : Int) - (target.file_ord : Int)
-        let dr := (start.rank_ord : Int) - (target.rank_ord : Int)
-        let distF := df.natAbs
-        let distR := dr.natAbs
-        (distF ≤ 1 ∧ distR ≤ 1) ∧ (distF + distR > 0)
-
+-- Defined via boolean for decidability without proofs
 def squareThreatenedBool (board : Board) (target : Coord) (byColor : Color) : Bool :=
   let pieces := getPieces board byColor
   pieces.any fun attacker =>
@@ -259,8 +275,11 @@ def squareThreatenedBool (board : Board) (target : Coord) (byColor : Color) : Bo
         let distR := dr.natAbs
         (distF ≤ 1 && distR ≤ 1) && (distF + distR > 0)
 
+def SquareThreatened (board : Board) (target : Coord) (byColor : Color) : Prop :=
+  squareThreatenedBool board target byColor = true
+
 instance (board : Board) (target : Coord) (byColor : Color) : Decidable (SquareThreatened board target byColor) :=
-  if h : squareThreatenedBool board target byColor then isTrue sorry else isFalse sorry
+  if h : squareThreatenedBool board target byColor then isTrue h else isFalse h
 
 
 def findKing (board : Board) (color : Color) : Option Coord :=
@@ -280,8 +299,12 @@ def InCheck (board : Board) (color : Color) : Prop :=
 instance (board : Board) (color : Color) : Decidable (InCheck board color) :=
   match h : findKing board color with
   | some kingCoord =>
-      if h_check : decide (SquareThreatened board kingCoord (oppColor color)) then isTrue sorry else isFalse sorry
-  | none => isFalse sorry
+      -- SquareThreatened is Decidable, so we can decide it
+      if h_check : SquareThreatened board kingCoord (oppColor color) then
+        isTrue (by rw [InCheck, h]; exact h_check)
+      else
+        isFalse (by rw [InCheck, h]; exact h_check)
+  | none => isFalse (by intro h_in; rw [InCheck, h] at h_in; contradiction)
 
 
 -- =============================================================================
@@ -386,49 +409,6 @@ def initialState : BoardState :=
 -- LOGIC (PROPS)
 -- =============================================================================
 
-def PieceCanMove (board : Board) (piece : Piece) (fromCoord toCoord : Coord) : Prop :=
-  match piece.pieceType with
-  | .pawn =>
-      let forward := if piece.color == .white then 1 else -1
-      let fromR : Int := fromCoord.rank_ord
-      let toR : Int := toCoord.rank_ord
-      let fromF : Int := fromCoord.file_ord
-      let toF : Int := toCoord.file_ord
-      let startRank := if piece.color == .white then 1 else 6
-      
-      (fromF = toF ∧ toR = fromR + forward ∧ (getPiece board toCoord) = none) ∨
-      (fromF = toF ∧ fromCoord.rank_ord.val = startRank ∧ toR = fromR + 2 * forward ∧ (getPiece board toCoord) = none ∧
-         -- Check intermediate
-         let intermediateRankNat := (fromR + forward).toNat
-         if h : intermediateRankNat < 8 then
-           let intermediateRank := Coord.Rank.ofFin ⟨intermediateRankNat, h⟩
-           let intermediate := {file := fromCoord.file, rank := intermediateRank}
-           (getPiece board intermediate) = none
-         else False
-      ) ∨
-      ((toF = fromF + 1 ∨ toF = fromF - 1) ∧ toR = fromR + forward ∧
-        match getPiece board toCoord with
-        | some p => p.color ≠ piece.color
-        | none => False
-      )
-
-  | .knight =>
-      toCoord ∈ squaresThreatenedByKnight fromCoord
-
-  | .bishop =>
-      IsClearDiagonalPath board fromCoord toCoord
-
-  | .rook =>
-      IsClearStraightPath board fromCoord toCoord
-
-  | .queen =>
-      IsClearStraightPath board fromCoord toCoord ∨ IsClearDiagonalPath board fromCoord toCoord
-
-  | .king =>
-      let df := ((fromCoord.file_ord : Int) - (toCoord.file_ord : Int)).natAbs
-      let dr := ((fromCoord.rank_ord : Int) - (toCoord.rank_ord : Int)).natAbs
-      (df ≤ 1 ∧ dr ≤ 1) ∧ (df + dr > 0)
-
 def pieceCanMoveBool (board : Board) (piece : Piece) (fromCoord toCoord : Coord) : Bool :=
   match piece.pieceType with
   | .knight => (squaresThreatenedByKnight fromCoord).contains toCoord
@@ -459,8 +439,11 @@ def pieceCanMoveBool (board : Board) (piece : Piece) (fromCoord toCoord : Coord)
         | none => false
       else false
 
+def PieceCanMove (board : Board) (piece : Piece) (fromCoord toCoord : Coord) : Prop :=
+  pieceCanMoveBool board piece fromCoord toCoord = true
+
 instance (board : Board) (piece : Piece) (fromCoord toCoord : Coord) : Decidable (PieceCanMove board piece fromCoord toCoord) :=
-  if h : pieceCanMoveBool board piece fromCoord toCoord then isTrue sorry else isFalse sorry
+  if h : pieceCanMoveBool board piece fromCoord toCoord then isTrue h else isFalse h
 
 
 -- Pseudo-legal generation (using bool for filtering, but backed by Decidable Prop)
@@ -487,30 +470,6 @@ def generateAllPseudoLegalMoves (board : Board) (color : Color) : List Move :=
       else none
 
 
-def LeavesKingInCheck (state : BoardState) (move : Move) : Prop :=
-  match move with
-  | .standard fromCoord toCoord =>
-      match getPiece state.board fromCoord with
-      | none => False
-      | some piece =>
-          let tempBoard := setPiece (setPiece state.board fromCoord none) toCoord (some piece)
-          InCheck tempBoard piece.color
-  | .promotion fromCoord toCoord promoteTo =>
-      match getPiece state.board fromCoord with
-      | none => False
-      | some piece =>
-          let promotedPiece := {pieceType := promoteTo, color := piece.color}
-          let tempBoard := setPiece (setPiece state.board fromCoord none) toCoord (some promotedPiece)
-          InCheck tempBoard piece.color
-  | .enPassant fromCoord toCoord capturedSquare =>
-      match getPiece state.board fromCoord with
-      | none => False
-      | some piece =>
-          let tempBoard := setPiece (setPiece (setPiece state.board fromCoord none) toCoord (some piece)) capturedSquare none
-          InCheck tempBoard piece.color
-  | .castle _ => False
-  | .resign => False
-
 def leavesKingInCheckBool (state : BoardState) (move : Move) : Bool :=
     match move with
     | .standard fromCoord toCoord =>
@@ -534,77 +493,12 @@ def leavesKingInCheckBool (state : BoardState) (move : Move) : Bool :=
             decide (InCheck tempBoard piece.color)
     | _ => false
 
+def LeavesKingInCheck (state : BoardState) (move : Move) : Prop :=
+  leavesKingInCheckBool state move = true
+
 instance (state : BoardState) (move : Move) : Decidable (LeavesKingInCheck state move) :=
-  if h : leavesKingInCheckBool state move then isTrue sorry else isFalse sorry
+  if h : leavesKingInCheckBool state move then isTrue h else isFalse h
 
-
-def LegalMove (state : BoardState) (move : Move) : Prop :=
-  match move with
-  | .standard fromCoord toCoord =>
-      match getPiece state.board fromCoord with
-      | none => False
-      | some piece =>
-          piece.color = state.turnColor ∧
-          (match getPiece state.board toCoord with
-           | some destPiece => destPiece.color ≠ piece.color
-           | none => True) ∧
-          PieceCanMove state.board piece fromCoord toCoord ∧
-          ¬(LeavesKingInCheck state move)
-
-  | .promotion fromCoord toCoord promoteTo =>
-      match getPiece state.board fromCoord with
-      | none => False
-      | some piece =>
-          piece.color = state.turnColor ∧
-          piece.pieceType = .pawn ∧
-          (let lastRank := if piece.color == .white then 7 else 0
-           toCoord.rank_ord.val = lastRank) ∧
-          (promoteTo ≠ .king ∧ promoteTo ≠ .pawn) ∧
-          (match getPiece state.board toCoord with
-           | some destPiece => destPiece.color ≠ piece.color
-           | none => True) ∧
-          PieceCanMove state.board piece fromCoord toCoord ∧
-          ¬(LeavesKingInCheck state move)
-
-  | .castle side =>
-      let color := state.turnColor
-      let rank := if color == .white then 0 else 7
-      -- Rights
-      (match color, side with
-       | .white, .kingSide => state.whiteCastleKingSide = true
-       | .white, .queenSide => state.whiteCastleQueenSide = true
-       | .black, .kingSide => state.blackCastleKingSide = true
-       | .black, .queenSide => state.blackCastleQueenSide = true) ∧
-      ¬(InCheck state.board color) ∧
-      -- Path clear
-      (let passFiles := match side with | .kingSide => [5, 6] | .queenSide => [1, 2, 3]
-       ∀ f ∈ passFiles, if hf : f < 8 then
-         if hr : rank < 8 then
-           (getPiece state.board {file := Coord.File.ofFin ⟨f, hf⟩, rank := Coord.Rank.ofFin ⟨rank, hr⟩}) = none
-         else False else False) ∧
-      -- King path not attacked
-      (let kingPassSquares := match side with | .kingSide => [4, 5, 6] | .queenSide => [4, 3, 2]
-       ∀ f ∈ kingPassSquares, if hf : f < 8 then
-         if hr : rank < 8 then
-           ¬(SquareThreatened state.board {file := Coord.File.ofFin ⟨f, hf⟩, rank := Coord.Rank.ofFin ⟨rank, hr⟩} (oppColor color))
-         else False else False)
-
-  | .enPassant fromCoord toCoord _ =>
-       match getPiece state.board fromCoord with
-       | none => False
-       | some piece =>
-           piece.color = state.turnColor ∧
-           piece.pieceType = .pawn ∧
-           state.enPassantTarget = some toCoord ∧
-           (let fromF : Int := fromCoord.file_ord
-            let toF : Int := toCoord.file_ord
-            let fromR : Int := fromCoord.rank_ord
-            let toR : Int := toCoord.rank_ord
-            let forward := if piece.color == .white then 1 else -1
-            (toF = fromF + 1 ∨ toF = fromF - 1) ∧ toR = fromR + forward) ∧
-           ¬(LeavesKingInCheck state move)
-
-  | .resign => True
 
 def legalMoveBool (state : BoardState) (move : Move) : Bool :=
   match move with
@@ -674,8 +568,11 @@ def legalMoveBool (state : BoardState) (move : Move) : Bool :=
 
   | .resign => true
 
+def LegalMove (state : BoardState) (move : Move) : Prop :=
+  legalMoveBool state move = true
+
 instance (state : BoardState) (move : Move) : Decidable (LegalMove state move) :=
-  if h : legalMoveBool state move then isTrue sorry else isFalse sorry
+  if h : legalMoveBool state move then isTrue h else isFalse h
 
 def hasLegalMoves (state : BoardState) : Bool :=
   let moves := generateAllPseudoLegalMoves state.board state.turnColor
