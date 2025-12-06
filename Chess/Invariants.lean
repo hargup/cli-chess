@@ -104,4 +104,3 @@ def ValidState (state : BoardState) : Prop :=
   TurnCheckInvariant state
 
 end Chess.Invariants
-
