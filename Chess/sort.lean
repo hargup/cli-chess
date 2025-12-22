@@ -2,9 +2,111 @@ import Mathlib.Data.List.Perm.Basic
 import Mathlib.Order.Basic
 import Mathlib.Data.Nat.Basic
 
+/-!
+# Certified Sorting Algorithms in Lean 4
+
+This file demonstrates how to write **provably correct** sorting algorithms in Lean 4
+using dependent types. The key insight is that instead of just returning a sorted list,
+we return a *proof bundle* that contains both the sorted list AND proofs of correctness.
+
+## The Approach: Correctness by Construction
+
+A sorting algorithm is correct if and only if:
+1. **Sortedness**: The output list is sorted (elements are in non-decreasing order)
+2. **Permutation**: The output is a permutation of the input (same elements, same counts)
+
+We encode this as a dependent type `SortedPerm l` that bundles:
+- `out`: The output list
+- `sorted`: A proof that `out` is sorted
+- `perm`: A proof that `out ~ l` (is a permutation of `l`)
+
+If you can construct a value of type `SortedPerm l`, you have *proven* your algorithm is correct!
+
+## Key Techniques Used
+
+### 1. Custom Sorted Predicate (Adjacency-Based)
+We define `Sorted` inductively with three cases:
+- Empty list `[]` is sorted
+- Singleton `[a]` is sorted
+- `a :: b :: l` is sorted if `a ≤ b` AND `b :: l` is sorted
+
+This adjacency-based definition is much easier to work with than "all pairs are ordered".
+
+### 2. Permutation Proofs with List.Perm
+We use Mathlib's `List.Perm` (written `~`) which has four constructors:
+- `nil`: `[] ~ []`
+- `cons a`: `l1 ~ l2 → (a :: l1) ~ (a :: l2)`
+- `swap a b`: `(a :: b :: l) ~ (b :: a :: l)`
+- `trans`: `l1 ~ l2 → l2 ~ l3 → l1 ~ l3`
+
+### 3. Pattern Matching with Type Annotations
+A tricky part of Lean proofs is that after pattern matching, hypothesis types don't
+automatically specialize. We often need explicit type annotations like:
+```
+have hsx' : Sorted (x :: x2 :: xs2) := hsx
+```
+
+### 4. Fuel-Based Termination for Merge Sort
+Merge sort is naturally recursive on list structure, but Lean needs to verify termination.
+We use a "fuel" parameter `n : Nat` that decreases each recursion level. When called with
+`fuel = l.length`, there's always enough fuel to complete.
+
+## File Structure
+
+1. **PermHelpers section**: Helper lemmas for permutation proofs
+   - `Perm.append_right`: Append same suffix preserves permutation
+   - `Perm.append_left`: Prepend same prefix preserves permutation
+   - `Perm.middle`: Moving an element from middle to front
+
+2. **Sorting section**: The main algorithms and proofs
+   - `Sorted`: Our sortedness predicate
+   - `SortedPerm`: The specification type
+   - `insert` / `insertSort`: Insertion sort implementation + proofs
+   - `split` / `merge` / `mergeSort`: Merge sort implementation + proofs
+
+## Proof Strategies
+
+### For Insertion Sort:
+- **perm_insert**: Insert one element. Use `Perm.cons` and `Perm.swap` to show the
+  element ends up somewhere in the list.
+- **sorted_insert**: Case split on where `x` goes. If `x ≤ head`, it goes in front.
+  Otherwise, recurse and use the IH.
+
+### For Merge Sort:
+- **perm_split**: The two halves together are a permutation of the original.
+  Use `Perm.middle` to move elements around.
+- **perm_merge**: Merging preserves permutation. Each step either picks from left
+  or right, maintaining the combined permutation.
+- **sorted_merge**: The tricky one! We need nested induction on both lists, and
+  careful case analysis on which element gets picked and what the recursive call produces.
+- **mergeSortAux_spec**: Prove the fuel-based function is correct by induction on fuel.
+
+## Running the Examples
+
+```lean
+#eval (insertSort [3,1,2,5,4]).out  -- Output: [1, 2, 3, 4, 5]
+#eval (mergeSort [3,1,2,5,4]).out   -- Output: [1, 2, 3, 4, 5]
+```
+
+The `.out` field extracts the sorted list. The proofs are erased at runtime!
+
+## References
+
+- Software Foundations (Coq): Verified Functional Algorithms
+- Mathlib documentation for `List.Perm`
+- Lean 4 documentation on inductive types and tactics
+-/
+
 open List
 
 namespace SortTutorial
+
+/-!
+## Section 1: Permutation Helper Lemmas
+
+These lemmas help us reason about permutations when elements are appended
+or moved around in lists. They don't require any ordering, just a type `α`.
+-/
 
 section PermHelpers
 variable {α : Type _}
@@ -31,8 +133,22 @@ theorem Perm.middle (l1 l2 : List α) (a : α) :
 
 end PermHelpers
 
+/-!
+## Section 2: Sorting Definitions and Proofs
+
+Now we introduce the `LinearOrder` constraint so we can compare elements.
+-/
+
 section Sorting
 variable {α : Type _} [LinearOrder α]
+
+/-!
+### The Sorted Predicate
+
+We define sortedness inductively with an adjacency-based approach.
+This means we only check that consecutive elements are in order,
+which makes proofs much simpler than checking all pairs.
+-/
 
 inductive Sorted : List α → Prop
   | nil : Sorted []
@@ -54,7 +170,18 @@ structure SortedPerm (l : List α) where
   sorted : Sorted out
   perm   : out ~ l
 
-/-! ### Insertion Sort -/
+/-!
+### Insertion Sort
+
+Insertion sort works by repeatedly inserting each element into its correct
+position in an already-sorted list. It's O(n²) but the proofs are straightforward.
+
+**Key insight**: We prove two properties separately:
+1. `perm_insert`: Inserting preserves permutation (the element is somewhere in the result)
+2. `sorted_insert`: Inserting into a sorted list produces a sorted list
+
+Then we compose these to get the full correctness proof.
+-/
 
 def insert (a : α) : List α → List α
   | [] => [a]
@@ -109,7 +236,23 @@ theorem sorted_insertSortList (l : List α) : Sorted (insertSortList l) := by
 def insertSort (l : List α) : SortedPerm l :=
   ⟨insertSortList l, sorted_insertSortList l, perm_insertSortList l⟩
 
-/-! ### Merge Sort -/
+/-!
+### Merge Sort
+
+Merge sort is O(n log n) and works by:
+1. **Split**: Divide the list into two halves (alternating elements)
+2. **Recurse**: Sort each half
+3. **Merge**: Combine two sorted lists into one sorted list
+
+The proofs are more complex than insertion sort because:
+- We need to prove `split` preserves permutation
+- We need to prove `merge` preserves both sortedness AND permutation
+- We use fuel-based recursion for termination
+
+**Termination Strategy**: We define `mergeSortAux fuel l` where `fuel` decreases
+each recursion. When called with `fuel = l.length`, we have enough fuel because
+`split` produces lists strictly shorter than the original (for length ≥ 2).
+-/
 
 def split : List α → List α × List α
   | [] => ([], [])
